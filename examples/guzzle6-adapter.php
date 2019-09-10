@@ -1,20 +1,32 @@
 <?php
+use duzun\hQuery;
+
+use Http\Discovery\MessageFactoryDiscovery;
+use Http\Adapter\Guzzle6\Client as GuzzleAdapter;
+
     // Read $url and $sel from request ($_POST | $_GET)
     $url = @$_POST['url'] ?: @$_GET['url'];
     $sel = @$_POST['sel'] ?: @$_GET['sel'];
     $go  = @$_POST['go']  ?: @$_GET['go'];
+
     $rm = strtoupper(getenv('REQUEST_METHOD') ?: $_SERVER['REQUEST_METHOD']);
-    // var_export(compact('url', 'sel', 'go')+[$rm]+$_SERVER);
     if ( $rm == 'POST' ) {
         require_once __DIR__ . '/../hquery.php';
+        require_once __DIR__ . '/vendor/autoload.php';
 
         $config = [
-            'user_agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Safari/537.36',
-            'accept_html' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'timeout' => 7,
+            // 'proxy' => [
+            //     'http'  => 'tcp://localhost:8125', // Use this proxy with "http"
+            //     'https' => 'tcp://localhost:9124', // Use this proxy with "https",
+            //     'no' => ['.mit.edu', 'foo.com']    // Don't use a proxy with these
+            // ],
+            'headers' => [
+                'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/59.0.3071.115 Safari/537.36',
+                'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Encoding' => 'gzip',
+            ],
         ];
-
-        // Enable cache
-        hQuery::$cache_path = sys_get_temp_dir() . '/hQuery/';
 
         // Results acumulator
         $return = array();
@@ -22,18 +34,18 @@
         // If we have $url to parse and $sel (selector) to fetch, we a good to go
         if($url && $sel) {
             try {
-                $doc = hQuery::fromUrl(
-                    $url
-                  , [
-                        'Accept'     => $config['accept_html'],
-                        'User-Agent' => $config['user_agent'],
-                        'Upgrade-Insecure-Requests' => 1,
-                    ]
-                );
-                if($doc) {
-                    // Follow redirects
-                    $t = $doc->href and $url = $t;
+                $client = GuzzleAdapter::createWithConfig($config);
+                $messageFactory = MessageFactoryDiscovery::find();
 
+                $request = $messageFactory->createRequest('GET', $url);
+                // $doc = hQuery::sendRequest($request, $client);
+
+                $read_time = microtime(true);
+                $response = $client->sendRequest($request);
+                $read_time = (microtime(true) - $read_time) * 1e3;
+                $doc = hQuery::fromHTML($response, $request->getUri());
+
+                if($doc) {
                     // Read some meta info from $doc
                     $t = $doc->find('head title') and $t = trim($t->text()) and $meta['title'] = $t;
                     $t = $doc->find('head meta');
@@ -144,13 +156,10 @@
             case 'meta':?>
                 <ul class="list-group">
                     <li class="list-group-item">
-                        hQuery::$cache_path: <?php echo hQuery::$cache_path ?>
-                    </li>
-                    <li class="list-group-item">
                         Size: <span data-name="doc.size" class="badge"><?=empty($doc)?'':$doc->size;?></span>
                         <br />
                     </li>
-                    <li class="list-group-item">Read Time: <span class="badge"><span data-name="doc.read_time"><?php echo $doc->read_time?></span> ms</span><br /></li>
+                    <li class="list-group-item">Read Time: <span class="badge"><span data-name="doc.read_time"><?php echo $doc->read_time ?: $read_time?></span> ms</span><br /></li>
                     <li class="list-group-item">Index Time: <span class="badge"><span data-name="doc.index_time"><?php echo $doc->index_time?></span> ms</span><br /></li>
                     <li class="list-group-item">
                         Charset: <span data-name="doc.charset" class="badge"><?=empty($doc)?'':$doc->charset;?></span>
